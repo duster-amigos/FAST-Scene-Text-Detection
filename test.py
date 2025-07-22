@@ -6,6 +6,7 @@ from datasets import FASTDataset
 from utils.logger import SimpleLogger
 from utils.metrics import compute_f1
 from tqdm import tqdm
+import numpy as np
 
 def test(
     img_dir, ann_dir, ckpt_path, batch_size=8, num_kernels=6, img_size=640, device='cuda'):
