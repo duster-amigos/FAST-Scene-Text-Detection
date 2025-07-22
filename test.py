@@ -9,7 +9,7 @@ from tqdm import tqdm
 import numpy as np
 
 def test(
-    img_dir, ann_dir, ckpt_path, batch_size=8, num_kernels=6, img_size=640, device='cuda'):
+    img_dir, ann_dir, ckpt_path, batch_size=16, num_kernels=6, img_size=640, device='cuda', dilation_size=9):
     logger = SimpleLogger()
     dataset = FASTDataset(img_dir, ann_dir, num_kernels=num_kernels, img_size=img_size)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -44,12 +44,13 @@ if __name__ == '__main__':
     parser.add_argument('--img_dir', type=str, required=True)
     parser.add_argument('--ann_dir', type=str, required=True)
     parser.add_argument('--ckpt', type=str, required=True)
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_kernels', type=int, default=6)
     parser.add_argument('--img_size', type=int, default=640)
     parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--dilation_size', type=int, default=9)
     args = parser.parse_args()
     test(
         args.img_dir, args.ann_dir, args.ckpt, args.batch_size,
-        args.num_kernels, args.img_size, args.device
+        args.num_kernels, args.img_size, args.device, args.dilation_size
     ) 

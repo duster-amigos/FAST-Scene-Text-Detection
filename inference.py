@@ -9,7 +9,7 @@ from tqdm import tqdm
 import numpy as np
 
 def inference(
-    img_dir, ann_dir, ckpt_path, out_dir, batch_size=8, num_kernels=6, img_size=640, device='cuda'):
+    img_dir, ann_dir, ckpt_path, out_dir, batch_size=16, num_kernels=6, img_size=640, device='cuda', dilation_size=9):
     os.makedirs(out_dir, exist_ok=True)
     logger = SimpleLogger(os.path.join(out_dir, 'inference.log'))
     dataset = FASTDataset(img_dir, ann_dir, num_kernels=num_kernels, img_size=img_size)
@@ -28,7 +28,7 @@ def inference(
             pred = torch.sigmoid(model(imgs))
             # Upsample prediction to match input image size
             pred = torch.nn.functional.interpolate(pred, size=imgs.shape[2:], mode='bilinear', align_corners=False)
-            polygons_batch = fast_postprocess(pred)
+            polygons_batch = fast_postprocess(pred, dilation_size=dilation_size)
             for img_name, polygons in zip(img_names, polygons_batch):
                 out_path = os.path.join(out_dir, img_name + '.npy')
                 try:
@@ -44,12 +44,13 @@ if __name__ == '__main__':
     parser.add_argument('--ann_dir', type=str, required=True)
     parser.add_argument('--ckpt', type=str, required=True)
     parser.add_argument('--out_dir', type=str, default='inference_results')
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_kernels', type=int, default=6)
     parser.add_argument('--img_size', type=int, default=640)
     parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--dilation_size', type=int, default=9)
     args = parser.parse_args()
     inference(
         args.img_dir, args.ann_dir, args.ckpt, args.out_dir, args.batch_size,
-        args.num_kernels, args.img_size, args.device
+        args.num_kernels, args.img_size, args.device, args.dilation_size
     ) 

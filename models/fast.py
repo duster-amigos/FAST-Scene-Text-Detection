@@ -57,11 +57,6 @@ class TextNetSmall(nn.Module):
             RepConvLayer(512, 512, (1,3), stride=1),
             RepConvLayer(512, 512, (3,1), stride=1)
         )
-        # Neck: reduce each stage output to 128 channels
-        self.reduce1 = RepConvLayer(64, 128, (3,3), stride=1)
-        self.reduce2 = RepConvLayer(128, 128, (3,3), stride=1)
-        self.reduce3 = RepConvLayer(256, 128, (3,3), stride=1)
-        self.reduce4 = RepConvLayer(512, 128, (3,3), stride=1)
     def forward(self, x):
         try:
             x = self.stem(x)
@@ -69,14 +64,36 @@ class TextNetSmall(nn.Module):
             f2 = self.stage2(f1)
             f3 = self.stage3(f2)
             f4 = self.stage4(f3)
-            # Reduce to 128 channels each
-            r1 = self.reduce1(f1)
-            r2 = self.reduce2(f2)
-            r3 = self.reduce3(f3)
-            r4 = self.reduce4(f4)
-            return [r1, r2, r3, r4]
+            return [f1, f2, f3, f4]
         except Exception as e:
             print(f"[ERROR] TextNetSmall forward error: {e}")
+            raise
+
+# ---- Neck: Reduce and Fuse Features ----
+class FASTNeck(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.reduce1 = RepConvLayer(64, 128, (3,3), stride=1)
+        self.reduce2 = RepConvLayer(128, 128, (3,3), stride=1)
+        self.reduce3 = RepConvLayer(256, 128, (3,3), stride=1)
+        self.reduce4 = RepConvLayer(512, 128, (3,3), stride=1)
+    def forward(self, features):
+        try:
+            r1 = self.reduce1(features[0])
+            r2 = self.reduce2(features[1])
+            r3 = self.reduce3(features[2])
+            r4 = self.reduce4(features[3])
+            h, w = r1.shape[2:]
+            up_feats = [
+                r1,
+                F.interpolate(r2, size=(h, w), mode='bilinear', align_corners=False),
+                F.interpolate(r3, size=(h, w), mode='bilinear', align_corners=False),
+                F.interpolate(r4, size=(h, w), mode='bilinear', align_corners=False)
+            ]
+            fuse = torch.cat(up_feats, dim=1)  # [B, 512, h, w]
+            return fuse
+        except Exception as e:
+            print(f"[ERROR] FASTNeck forward error: {e}")
             raise
 
 # ---- Head (from config) ----
@@ -99,15 +116,13 @@ class FAST(nn.Module):
     def __init__(self, num_kernels=5):
         super().__init__()
         self.backbone = TextNetSmall()
+        self.neck = FASTNeck()
         self.head = FASTHead(out_channels=num_kernels)
     def forward(self, x):
         try:
-            features = self.backbone(x)  # [r1, r2, r3, r4], each [B,128,H/4,W/4] etc
-            # Upsample all to the same size as r1
-            h, w = features[0].shape[2:]
-            up_feats = [F.interpolate(f, size=(h, w), mode='bilinear', align_corners=False) for f in features]
-            fuse = torch.cat(up_feats, dim=1)  # [B, 512, h, w]
-            out = self.head(fuse)
+            features = self.backbone(x)  # [f1, f2, f3, f4]
+            fuse = self.neck(features)   # [B, 512, h, w]
+            out = self.head(fuse)        # [B, 5, h, w]
             return out
         except Exception as e:
             print(f"[ERROR] FAST model forward error: {e}")

@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import cv2
 
-def fast_postprocess(pred, thresh=0.5, kernel_thresh=0.5, min_area=300, dilation_size=3):
+def fast_postprocess(pred, thresh=0.5, kernel_thresh=0.5, min_area=300, dilation_size=9):
     try:
         batch_size = pred.shape[0]
         num_kernels = pred.shape[1]
