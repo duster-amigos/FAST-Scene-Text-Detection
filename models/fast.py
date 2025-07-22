@@ -2,127 +2,112 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ---- Custom Blocks for TextNetSmall ----
-class Conv3x3(nn.Module):
-    def __init__(self, in_planes, out_planes, stride=1):
+# ---- RepConvLayer (Conv+BN+ReLU) ----
+class RepConvLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1):
         super().__init__()
-        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn = nn.BatchNorm2d(out_planes)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride,
+                              padding=(kernel_size[0]//2, kernel_size[1]//2), dilation=dilation, groups=groups, bias=False)
+        self.bn = nn.BatchNorm2d(out_channels, momentum=0.1, eps=0.001)
     def forward(self, x):
         return F.relu(self.bn(self.conv(x)))
-
-class Conv1x3(nn.Module):
-    def __init__(self, in_planes, out_planes, stride=1):
-        super().__init__()
-        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=(1,3), stride=stride, padding=(0,1), bias=False)
-        self.bn = nn.BatchNorm2d(out_planes)
-    def forward(self, x):
-        return F.relu(self.bn(self.conv(x)))
-
-class Conv3x1(nn.Module):
-    def __init__(self, in_planes, out_planes, stride=1):
-        super().__init__()
-        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=(3,1), stride=stride, padding=(1,0), bias=False)
-        self.bn = nn.BatchNorm2d(out_planes)
-    def forward(self, x):
-        return F.relu(self.bn(self.conv(x)))
-
-class Identity(nn.Module):
-    def __init__(self, in_planes, out_planes, stride=1):
-        super().__init__()
-        self.need_proj = (in_planes != out_planes) or (stride != 1)
-        if self.need_proj:
-            self.proj = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
-            self.bn = nn.BatchNorm2d(out_planes)
-    def forward(self, x):
-        if self.need_proj:
-            return F.relu(self.bn(self.proj(x)))
-        return x
 
 # ---- TextNetSmall Backbone (from fast_small.config) ----
-# Block types: 0=Conv3x3, 1=Conv1x3, 2=Conv3x1, 3=Identity
-# These are the block types for each stage, from the official config
-stage_blocks = [
-    # Stage 1 (C=64)
-    [0, 0, 0],
-    # Stage 2 (C=128)
-    [0, 1, 2, 0, 1, 2],
-    # Stage 3 (C=256)
-    [0, 1, 2, 0, 1, 2, 0, 1, 2, 0],
-    # Stage 4 (C=512)
-    [0, 1, 2, 0, 1, 2, 0, 1, 2, 0],
-]
-block_map = [Conv3x3, Conv1x3, Conv3x1, Identity]
-channels = [64, 128, 256, 512]
-
 class TextNetSmall(nn.Module):
     def __init__(self):
         super().__init__()
+        # Stem
         self.stem = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64, momentum=0.1, eps=0.001),
+            nn.ReLU(inplace=True)
         )
-        self.stages = nn.ModuleList()
-        in_planes = 64
-        for stage_idx, blocks in enumerate(stage_blocks):
-            out_planes = channels[stage_idx]
-            stage = []
-            for i, block_type in enumerate(blocks):
-                stride = 2 if (i == 0) else 1  # Downsample at first block of each stage
-                block = block_map[block_type](in_planes, out_planes, stride)
-                stage.append(block)
-                in_planes = out_planes
-            self.stages.append(nn.Sequential(*stage))
+        # Stage 1
+        self.stage1 = nn.Sequential(
+            RepConvLayer(64, 64, (3,3), stride=1),
+            RepConvLayer(64, 64, (3,3), stride=2)
+        )
+        # Stage 2
+        self.stage2 = nn.Sequential(
+            RepConvLayer(64, 128, (3,3), stride=2),
+            RepConvLayer(128, 128, (1,3), stride=1),
+            RepConvLayer(128, 128, (3,3), stride=1),
+            RepConvLayer(128, 128, (3,1), stride=1),
+            RepConvLayer(128, 128, (3,3), stride=1),
+            RepConvLayer(128, 128, (3,1), stride=1),
+            RepConvLayer(128, 128, (1,3), stride=1),
+            RepConvLayer(128, 128, (3,3), stride=1)
+        )
+        # Stage 3
+        self.stage3 = nn.Sequential(
+            RepConvLayer(128, 256, (3,3), stride=2),
+            RepConvLayer(256, 256, (3,3), stride=1),
+            RepConvLayer(256, 256, (1,3), stride=1),
+            RepConvLayer(256, 256, (3,1), stride=1),
+            RepConvLayer(256, 256, (3,3), stride=1),
+            RepConvLayer(256, 256, (1,3), stride=1),
+            RepConvLayer(256, 256, (3,1), stride=1),
+            RepConvLayer(256, 256, (3,3), stride=1)
+        )
+        # Stage 4
+        self.stage4 = nn.Sequential(
+            RepConvLayer(256, 512, (3,3), stride=2),
+            RepConvLayer(512, 512, (3,1), stride=1),
+            RepConvLayer(512, 512, (1,3), stride=1),
+            RepConvLayer(512, 512, (1,3), stride=1),
+            RepConvLayer(512, 512, (3,1), stride=1)
+        )
+        # Neck: reduce each stage output to 128 channels
+        self.reduce1 = RepConvLayer(64, 128, (3,3), stride=1)
+        self.reduce2 = RepConvLayer(128, 128, (3,3), stride=1)
+        self.reduce3 = RepConvLayer(256, 128, (3,3), stride=1)
+        self.reduce4 = RepConvLayer(512, 128, (3,3), stride=1)
     def forward(self, x):
         try:
             x = self.stem(x)
-            feats = []
-            for stage in self.stages:
-                x = stage(x)
-                feats.append(x)
-            return feats  # [f1, f2, f3, f4]
+            f1 = self.stage1(x)
+            f2 = self.stage2(f1)
+            f3 = self.stage3(f2)
+            f4 = self.stage4(f3)
+            # Reduce to 128 channels each
+            r1 = self.reduce1(f1)
+            r2 = self.reduce2(f2)
+            r3 = self.reduce3(f3)
+            r4 = self.reduce4(f4)
+            return [r1, r2, r3, r4]
         except Exception as e:
             print(f"[ERROR] TextNetSmall forward error: {e}")
             raise
 
-# ---- MKR Head (unchanged, as before) ----
-class MKRHead(nn.Module):
-    def __init__(self, in_channels=[64,128,256,512], out_channels=6):
+# ---- Head (from config) ----
+class FASTHead(nn.Module):
+    def __init__(self, out_channels=5):
         super().__init__()
-        self.conv_f4 = nn.Conv2d(in_channels[3], 128, 3, padding=1)
-        self.conv_f3 = nn.Conv2d(in_channels[2], 128, 3, padding=1)
-        self.conv_f2 = nn.Conv2d(in_channels[1], 128, 3, padding=1)
-        self.conv_f1 = nn.Conv2d(in_channels[0], 128, 3, padding=1)
-        self.head_conv1 = nn.Conv2d(128*4, 256, 3, padding=1)
-        self.head_conv2 = nn.Conv2d(256, out_channels, 1)
-    def forward(self, features):
+        self.conv = RepConvLayer(512, 128, (3,3), stride=1)
+        self.final = nn.Conv2d(128, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
+    def forward(self, x):
         try:
-            f1, f2, f3, f4 = features
-            h, w = f1.shape[2:]
-            f4 = F.interpolate(self.conv_f4(f4), size=(h, w), mode='bilinear', align_corners=False)
-            f3 = F.interpolate(self.conv_f3(f3), size=(h, w), mode='bilinear', align_corners=False)
-            f2 = F.interpolate(self.conv_f2(f2), size=(h, w), mode='bilinear', align_corners=False)
-            f1 = self.conv_f1(f1)
-            fuse = torch.cat([f1, f2, f3, f4], dim=1)
-            out = F.relu(self.head_conv1(fuse))
-            out = self.head_conv2(out)
-            return out
+            x = self.conv(x)
+            x = self.final(x)
+            return x
         except Exception as e:
-            print(f"[ERROR] MKRHead forward error: {e}")
+            print(f"[ERROR] FASTHead forward error: {e}")
             raise
 
 # ---- FAST Model ----
 class FAST(nn.Module):
-    def __init__(self, num_kernels=6):
+    def __init__(self, num_kernels=5):
         super().__init__()
         self.backbone = TextNetSmall()
-        self.head = MKRHead(out_channels=num_kernels)
+        self.head = FASTHead(out_channels=num_kernels)
     def forward(self, x):
         try:
-            features = self.backbone(x)
-            out = self.head(features)
+            features = self.backbone(x)  # [r1, r2, r3, r4], each [B,128,H/4,W/4] etc
+            # Upsample all to the same size as r1
+            h, w = features[0].shape[2:]
+            up_feats = [F.interpolate(f, size=(h, w), mode='bilinear', align_corners=False) for f in features]
+            fuse = torch.cat(up_feats, dim=1)  # [B, 512, h, w]
+            out = self.head(fuse)
             return out
         except Exception as e:
             print(f"[ERROR] FAST model forward error: {e}")
