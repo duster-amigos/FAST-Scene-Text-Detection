@@ -24,7 +24,10 @@ def test(
         for batch in tqdm(dataloader, desc='Testing'):
             imgs = batch['image'].to(device)
             gt_text = batch['gt_text'].cpu().numpy()
-            pred = torch.sigmoid(model(imgs)).cpu().numpy()
+            pred = torch.sigmoid(model(imgs))
+            # Upsample prediction to match ground truth size
+            pred = torch.nn.functional.interpolate(pred, size=gt_text.shape[2:], mode='bilinear', align_corners=False)
+            pred = pred.cpu().numpy()
             for i in range(imgs.size(0)):
                 pred_bin = (pred[i,0] > 0.5).astype(np.uint8)
                 gt_bin = (gt_text[i,0] > 0.5).astype(np.uint8)

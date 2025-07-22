@@ -26,6 +26,8 @@ def inference(
             imgs = batch['image'].to(device)
             img_names = batch['img_name']
             pred = torch.sigmoid(model(imgs))
+            # Upsample prediction to match input image size
+            pred = torch.nn.functional.interpolate(pred, size=imgs.shape[2:], mode='bilinear', align_corners=False)
             polygons_batch = fast_postprocess(pred)
             for img_name, polygons in zip(img_names, polygons_batch):
                 out_path = os.path.join(out_dir, img_name + '.npy')

@@ -34,6 +34,8 @@ def train(
             training_mask = batch['training_mask'].to(device)
             optimizer.zero_grad()
             pred = model(imgs)
+            # Upsample prediction to match ground truth size
+            pred = torch.nn.functional.interpolate(pred, size=gt_text.shape[2:], mode='bilinear', align_corners=False)
             loss, loss_dict = criterion(pred, gt_text, gt_kernels, training_mask)
             loss.backward()
             optimizer.step()
