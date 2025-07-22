@@ -3,6 +3,7 @@ import glob
 import numpy as np
 from PIL import Image, ImageDraw
 import subprocess
+import torch
 
 # =========================
 # 1. SYNTHETIC DATA CREATION
@@ -33,16 +34,18 @@ def create_synthetic_data():
 
 def run_training():
     print("=== TRAINING ===")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     cmd = [
         'python', 'train.py',
         '--img_dir', 'images',
         '--ann_dir', 'annotations',
         '--save_dir', 'checkpoints',
-        '--epochs', '2',
+        '--epochs', '2',  # quick test
         '--batch_size', '2',
         '--img_size', '128',
         '--num_kernels', '3',
-        '--device', 'cpu'
+        '--device', device,
+        '--dilation_size', '9'
     ]
     subprocess.run(cmd, check=True)
 
@@ -52,6 +55,7 @@ def run_training():
 
 def run_testing():
     print("=== TESTING ===")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     ckpts = sorted(glob.glob('checkpoints/*.pth'))
     ckpt = ckpts[-1] if ckpts else None
     print("Using checkpoint:", ckpt)
@@ -64,7 +68,8 @@ def run_testing():
             '--batch_size', '2',
             '--img_size', '128',
             '--num_kernels', '3',
-            '--device', 'cpu'
+            '--device', device,
+            '--dilation_size', '9'
         ]
         subprocess.run(cmd, check=True)
 
@@ -74,6 +79,7 @@ def run_testing():
 
 def run_inference():
     print("=== INFERENCE ===")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     ckpts = sorted(glob.glob('checkpoints/*.pth'))
     ckpt = ckpts[-1] if ckpts else None
     if ckpt:
@@ -86,7 +92,8 @@ def run_inference():
             '--batch_size', '2',
             '--img_size', '128',
             '--num_kernels', '3',
-            '--device', 'cpu'
+            '--device', device,
+            '--dilation_size', '9'
         ]
         subprocess.run(cmd, check=True)
 
@@ -111,6 +118,7 @@ def main():
     run_testing()
     run_inference()
     check_outputs()
+    print("\n[INFO] Mixed precision is automatically enabled if CUDA is available.")
 
 if __name__ == '__main__':
     main() 
