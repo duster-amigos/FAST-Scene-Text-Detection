@@ -1,4 +1,4 @@
-# FAST: Fast Arbitrary-Shaped Text Detector (PyTorch, Modern)
+# FAST: Fast Arbitrary-Shaped Text Detector
 
 This repository implements the FAST text detection model from [arXiv:2111.02394](https://arxiv.org/pdf/2111.02394)
 
