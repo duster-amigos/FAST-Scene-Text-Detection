@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import cv2
 
-def fast_postprocess(pred, thresh=0.5, kernel_thresh=0.5, min_area=300):
+def fast_postprocess(pred, thresh=0.5, kernel_thresh=0.5, min_area=300, dilation_size=3):
     try:
         batch_size = pred.shape[0]
         num_kernels = pred.shape[1]
@@ -18,8 +18,10 @@ def fast_postprocess(pred, thresh=0.5, kernel_thresh=0.5, min_area=300):
             polygons = []
             for i in range(1, cc):
                 mask = (labels == i).astype(np.uint8)
-                # Dilate to text region
-                mask = cv2.dilate(mask, np.ones((3,3), np.uint8), iterations=2)
+                # Dilation with F.max_pool2d (GPU, as in paper)
+                mask_torch = torch.from_numpy(mask).unsqueeze(0).unsqueeze(0).float()  # [1,1,H,W]
+                mask_torch = F.max_pool2d(mask_torch, dilation_size, 1, dilation_size//2)
+                mask = (mask_torch.squeeze().cpu().numpy() > 0).astype(np.uint8)
                 mask = mask * text_mask
                 # Find contours
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

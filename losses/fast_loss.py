@@ -18,9 +18,6 @@ def dice_loss(input, target, mask, eps=1e-6):
         raise
 
 def ohem_mask(pred, gt, training_mask, ratio=3):
-    # pred: (N, H, W) after sigmoid
-    # gt: (N, H, W)
-    # training_mask: (N, H, W)
     with torch.no_grad():
         pos = (gt > 0.5) & (training_mask > 0.5)
         neg = (gt <= 0.5) & (training_mask > 0.5)
@@ -34,33 +31,34 @@ def ohem_mask(pred, gt, training_mask, ratio=3):
             n_pos = pos_num[i].item()
             n_neg = min(int(ratio * n_pos), int(neg_num[i].item()))
             if n_neg > 0:
-                # For negatives, select those with highest prediction (hardest negatives)
                 neg_pred = pred[i][neg_idx]
                 if neg_pred.numel() > 0:
                     sorted_idx = torch.argsort(neg_pred, descending=True)
                     hard_neg_idx = neg_idx.nonzero(as_tuple=True)
-                    selected = tuple(idx[sorted_idx[:n_neg]] for idx in hard_neg_idx)
-                    mask[i][neg_idx] = 0.0  # clear all first
+                    mask[i][neg_idx] = 0.0
                     mask[i][neg_idx][sorted_idx[:n_neg]] = 1.0
         return mask
 
 class FASTLoss(nn.Module):
-    def __init__(self, num_kernels=6, alpha=0.5):
+    def __init__(self, num_kernels=6, alpha=0.5, dilation_size=3):
         super().__init__()
         self.num_kernels = num_kernels
         self.alpha = alpha  # weight for text region loss (paper uses 0.5)
+        self.dilation_size = dilation_size
     def forward(self, pred, gt_text, gt_kernels, training_mask):
         try:
             pred_text = pred[:, 0, :, :]
             pred_kernels = pred[:, 1:, :, :]
             gt_text = gt_text.squeeze(1)
             training_mask = training_mask.squeeze(1)
-            # OHEM mask for text region
+            # Dilation with F.max_pool2d (as in paper)
+            pred_prob = torch.sigmoid(pred_text)
+            pred_dilated = F.max_pool2d(pred_prob.unsqueeze(1), self.dilation_size, 1, self.dilation_size//2).squeeze(1)
+            # OHEM mask for text region (on dilated region)
             with torch.no_grad():
-                pred_prob = torch.sigmoid(pred_text)
-                ohem = ohem_mask(pred_prob, gt_text, training_mask, ratio=3)
-            # Text region loss (Dice with OHEM mask)
-            loss_text = dice_loss(pred_prob, gt_text, ohem)
+                ohem = ohem_mask(pred_dilated, gt_text, training_mask, ratio=3)
+            # Text region loss (Dice with OHEM mask, on dilated region)
+            loss_text = dice_loss(pred_dilated, gt_text, ohem)
             # Kernel loss (Dice, as in paper)
             loss_kernels = 0
             for i in range(self.num_kernels-1):

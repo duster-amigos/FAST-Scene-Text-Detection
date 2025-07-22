@@ -58,16 +58,18 @@ class TextNet(nn.Module):
             print(f"[ERROR] TextNet forward error: {e}")
             raise
 
-# ---- MKR Head (Multi-scale Kernel Representation) ----
+# ---- MKR Head (Multi-scale Kernel Representation, faithful to FAST paper) ----
 class MKRHead(nn.Module):
     def __init__(self, in_channels=[64,128,256,512], out_channels=6):
         super().__init__()
-        # FPN-like upsampling and fusion
-        self.conv_f4 = nn.Conv2d(in_channels[3], 128, 1)
-        self.conv_f3 = nn.Conv2d(in_channels[2], 128, 1)
-        self.conv_f2 = nn.Conv2d(in_channels[1], 128, 1)
-        self.conv_f1 = nn.Conv2d(in_channels[0], 128, 1)
-        self.out_conv = nn.Conv2d(128, out_channels, 1)
+        # 3x3 convs for channel reduction (paper)
+        self.conv_f4 = nn.Conv2d(in_channels[3], 128, 3, padding=1)
+        self.conv_f3 = nn.Conv2d(in_channels[2], 128, 3, padding=1)
+        self.conv_f2 = nn.Conv2d(in_channels[1], 128, 3, padding=1)
+        self.conv_f1 = nn.Conv2d(in_channels[0], 128, 3, padding=1)
+        # 2-layer conv head after concatenation
+        self.head_conv1 = nn.Conv2d(128*4, 256, 3, padding=1)
+        self.head_conv2 = nn.Conv2d(256, out_channels, 1)
     def forward(self, features):
         try:
             f1, f2, f3, f4 = features
@@ -76,8 +78,10 @@ class MKRHead(nn.Module):
             f3 = F.interpolate(self.conv_f3(f3), size=(h, w), mode='bilinear', align_corners=False)
             f2 = F.interpolate(self.conv_f2(f2), size=(h, w), mode='bilinear', align_corners=False)
             f1 = self.conv_f1(f1)
-            fuse = f1 + f2 + f3 + f4
-            out = self.out_conv(fuse)
+            # Concatenate, not sum
+            fuse = torch.cat([f1, f2, f3, f4], dim=1)
+            out = F.relu(self.head_conv1(fuse))
+            out = self.head_conv2(out)
             return out
         except Exception as e:
             print(f"[ERROR] MKRHead forward error: {e}")
